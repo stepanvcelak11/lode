@@ -23,6 +23,12 @@ export function clear(el) {
 }
 
 let toastTimer = null;
+
+export function hideToast() {
+  const el = document.getElementById('toast');
+  if (el) el.classList.remove('show');
+}
+
 export function toast(text) {
   let el = document.getElementById('toast');
   if (!el) {

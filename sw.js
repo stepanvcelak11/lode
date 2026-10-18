@@ -1,5 +1,5 @@
 // Service worker – hra funguje i bez internetu. Při změně souborů zvyš VERSION.
-const VERSION = 'lode-v1';
+const VERSION = 'lode-v2';
 const FILES = [
   './',
   'index.html',
@@ -17,11 +17,14 @@ const FILES = [
   'src/engine/bot.js',
   'src/ui/app.js',
   'src/ui/board.js',
+  'src/ui/dice.js',
   'src/ui/dom.js',
   'src/ui/editor.js',
+  'src/ui/icons.js',
   'src/ui/markdown.js',
   'src/ui/play.js',
   'src/ui/render.js',
+  'src/ui/widgets.js',
 ];
 
 self.addEventListener('install', (event) => {
