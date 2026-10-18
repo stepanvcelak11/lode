@@ -1,0 +1,11 @@
+{
+  "name": "lode",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Lodě – strategická hra lodí pro dva hráče (PWA)",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "start": "npx --yes http-server -c-1 -p 8080 ."
+  }
+}
