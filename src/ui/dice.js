@@ -18,7 +18,7 @@ function setFace(el, value) {
 let closeTimer = null;
 
 // layer – prvek překryvu; rolls – [{values, label}]; messages – texty výsledku.
-export function showDice(layer, rolls, messages = [], { fast = false, onClose = null } = {}) {
+export function showDice(layer, rolls, messages = [], { fast = false, speed = 1, onClose = null } = {}) {
   clearTimeout(closeTimer);
   const close = () => {
     if (!layer.classList.contains('show')) return;
@@ -49,6 +49,10 @@ export function showDice(layer, rolls, messages = [], { fast = false, onClose = 
     h('div', { class: 'dice-hint' }, 'Klepni kamkoli pro pokračování')));
   layer.onclick = close;
   layer.classList.add('show');
-  const wait = (fast ? 1300 : 2300) + rolls.length * 300;
+  // Dost času na přečtení: delší text = delší čekání. Klepnutím se dá zavřít dřív.
+  const textLen = shown.join(' ').length;
+  const wait = fast
+    ? (1800 + rolls.length * 400 + textLen * 18) * speed
+    : 3000 + rolls.length * 500 + textLen * 30;
   closeTimer = setTimeout(close, wait);
 }

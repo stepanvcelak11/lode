@@ -2,13 +2,15 @@
 
 Mobilní (webová) verze strategické hry **Lodě** – námořní bitva pro dva hráče s pevninou, stavbami, děly, majáky, minami a bonusy. Pravidla jsou v souboru [PRAVIDLA.md](PRAVIDLA.md) a zobrazují se i přímo ve hře.
 
-## Co hra umí (verze 0.1)
+## Co hra umí (verze 0.3)
 
 - Plocha 24 × 19 (řádky A–R včetně CH), editor rozmístění s kontrolou všech pravidel a tlačítkem „Náhodně“.
 - Všechny lodě, stavby, ostrovy, majáky, speciální políčko, miny a vlastní tvar ULO i jeho střely.
 - Kompletní průběh tahu s kostkami: voda/pevnina, výběr lodě, děla, naváděné střely, devítky, sonary, hledač, základna, bunkr, vzdušná obrana a všechny bonusy.
 - Záznamník (jako papírová tabulka) a deník tahů.
-- **Hra proti počítači** a **dva hráči na jednom zařízení** (s obrazovkou „předej telefon“).
+- **Hra proti počítači** ve třech obtížnostech (lehká, střední, těžká) s nastavitelnou rychlostí; počítač před výstřelem ukáže, kam míří, a po jeho tahu se zobrazí shrnutí.
+- **Dva hráči na jednom zařízení** (s obrazovkou „předej telefon“ a shrnutím soupeřova tahu).
+- Logický editor: stavby jen na pevninu, okamžité kontroly pravidel, kreslení pevniny tahem prstu.
 - Hra se průběžně ukládá a funguje i bez internetu; dá se nainstalovat na plochu telefonu (PWA).
 
 ## Spuštění

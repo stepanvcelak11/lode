@@ -186,6 +186,24 @@ button { font: inherit; color: inherit; }
 .vs-line { text-align: center; color: var(--muted); font-weight: 700; letter-spacing: .2em; margin: -6px 0; }
 .how { margin: 4px 0; padding-left: 1.3em; color: var(--muted); font-size: 14px; display: flex; flex-direction: column; gap: 6px; }
 
+.pref { display: flex; flex-direction: column; gap: 8px; }
+.pref h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.diff { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.diff-opt {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left;
+  padding: 10px; border-radius: 14px; border: 1px solid var(--line-2); background: var(--bg-2); cursor: pointer;
+}
+.diff-opt strong { font-size: 15px; }
+.diff-opt small { color: var(--muted); font-size: 12px; line-height: 1.3; }
+.diff-opt.active { border-color: var(--accent); background: var(--surface-3); box-shadow: 0 0 0 3px rgba(242, 181, 68, .2); }
+.diff-dots { display: flex; gap: 3px; }
+.diff-dots i { width: 8px; height: 8px; border-radius: 50%; background: rgba(255, 255, 255, .18); }
+.d-easy i:nth-child(1), .d-normal i:nth-child(-n+2), .d-hard i { background: var(--accent); }
+.d-hard i { background: var(--danger); }
+.seg.wide { display: flex; }
+.seg.wide button { flex: 1; padding: 9px 10px; }
+@media (max-width: 380px) { .diff { grid-template-columns: 1fr; } }
+
 .pass-screen { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; padding: 24px; }
 .pass-screen h1 { font-size: 34px; }
 .pass-screen .btn { width: min(320px, 100%); }
@@ -366,6 +384,7 @@ button { font: inherit; color: inherit; }
 .ghost.bad { background-image: linear-gradient(rgba(255, 95, 109, .6), rgba(255, 95, 109, .6)); }
 .seen:not(.preview):not(.option) { background-image: linear-gradient(225deg, var(--accent) 0 17%, transparent 18%); }
 .targeting .t-fog:hover { background: #1c4875; }
+.paint-mode .board, .paint-mode .cell { touch-action: none; }
 
 /* hlášení přes plochu */
 .board-banner { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; z-index: 6; }
@@ -378,7 +397,7 @@ button { font: inherit; color: inherit; }
   box-shadow: 0 14px 44px rgba(0, 0, 0, .55);
   opacity: 0;
 }
-.board-banner.show .banner { animation: bannerIn 2.2s ease both; }
+.board-banner.show .banner { animation: bannerIn 3.2s ease both; }
 .banner strong { display: block; font-size: 26px; font-weight: 850; letter-spacing: .01em; }
 .banner span { color: var(--muted); font-size: 14px; }
 .banner-ico svg { width: 36px; height: 36px; }
@@ -486,6 +505,24 @@ button { font: inherit; color: inherit; }
 .bot-thinking { display: flex; align-items: center; gap: 10px; font-size: 16px; }
 .spinner { width: 20px; height: 20px; border-radius: 50%; border: 3px solid var(--surface-3); border-top-color: var(--pc1, #ff7f9e); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* náhled, kam míří soupeř */
+.preview.enemy { background-image: linear-gradient(rgba(255, 95, 109, .5), rgba(255, 95, 109, .5)); }
+
+/* shrnutí soupeřova tahu */
+.summary { list-style: none; margin: 0; padding: 8px 10px; max-height: 34dvh; overflow: auto; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 3px; font-size: 14px; color: var(--muted); }
+.summary li::before { content: '› '; color: var(--accent); font-weight: 800; }
+.summary li.sum-head { color: var(--text); font-weight: 750; font-size: 13px; margin-top: 4px; }
+.summary li.sum-head::before { content: none; }
+.summary li.hot { color: var(--text); }
+.summary li.big { color: #ff8b8b; font-weight: 700; }
+.summary li.bonus { color: var(--accent-2); }
+
+/* volba rychlosti */
+.speed { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+.seg { display: inline-flex; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 2px; }
+.seg button { border: 0; background: none; color: var(--muted); padding: 6px 10px; border-radius: 8px; font-size: 13px; font-weight: 650; cursor: pointer; }
+.seg button.active { background: var(--surface-3); color: var(--text); }
 
 /* ---------------------------------------------------------------- kostky */
 .dice-layer {
@@ -661,6 +698,9 @@ button { font: inherit; color: inherit; }
 .tool-count small { font-weight: 600; }
 .tool.full .tool-count { color: #05210f; background: var(--ok); }
 .tool.erase .tool-name { color: #f2a3b3; }
+.tool.locked { opacity: .55; }
+.tool.locked .tool-ico { filter: grayscale(1); }
+.tool-lock { font-size: 10.5px; color: var(--muted); line-height: 1.1; }
 .issues .ok-line { color: var(--ok); font-weight: 650; font-size: 14px; }
 .issue-box { background: rgba(255, 95, 109, .08); border: 1px solid rgba(255, 95, 109, .3); border-radius: 12px; padding: 8px 12px; }
 .issue-box summary { cursor: pointer; font-weight: 650; color: #ffb3bb; font-size: 14px; }

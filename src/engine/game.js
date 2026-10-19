@@ -510,7 +510,7 @@ function hitCell(state, ai, di, cell, source) {
       const s = D.structures[content.index];
       const k = s.cells.indexOf(cell);
       const name = STRUCTURE_TYPES[s.type].name;
-      if (s.destroyed) { result = `${name} (už zničeno)`; break; }
+      if (s.destroyed) { A.known[cell] = `sx:${s.type}`; result = `${name} (už zničeno)`; break; }
       s.hit[k] = true;
       const destroyed = s.type === 'Z' ? s.hit.every(Boolean) : true;
       if (destroyed) {

@@ -14,9 +14,17 @@ import { icon } from './icons.js';
 import { shipSilhouette, fleetStrip, patternEl, legendEl, shapeEl } from './widgets.js';
 import { h, toast } from './dom.js';
 
-const BOT_DELAY = { aim: 1100, end: 900, default: 800 };
+// Prodlevy počítače (ms) při normální rychlosti; rychlost je násobí.
+const BOT_DELAY = { aim: 1200, end: 1000, default: 1100 };
+const AIM_PREVIEW = 1500;
+export const SPEEDS = {
+  slow: { label: 'Pomalu', mult: 1.8 },
+  normal: { label: 'Normálně', mult: 1 },
+  fast: { label: 'Rychle', mult: 0.45 },
+};
+const TURN_START = ['place-mine', 'roll-double', 'roll-domain'];
 
-export function openGame(root, { state, mode, botPlayer = 1, onChange, onExit, onNewGame }) {
+export function openGame(root, { state, mode, botPlayer = 1, difficulty = 'normal', speed: initialSpeed = 'normal', onChange, onExit, onNewGame, onSettings = () => {} }) {
   let tab = 'target';
   let aim = null;
   let mineCell = null;
@@ -25,7 +33,11 @@ export function openGame(root, { state, mode, botPlayer = 1, onChange, onExit, o
   let flashShown = null;
   let revealAll = false;
   let gameoverShown = false;
+  let speed = SPEEDS[initialSpeed] ? initialSpeed : 'normal';
+  let botAim = null; // kam počítač právě míří (náhled před výstřelem)
+  let ackTurn = null; // tah, ve kterém hráč už viděl shrnutí soupeřova tahu
   const botRng = createRng(Date.now());
+  const mult = () => SPEEDS[speed].mult;
 
   const viewer = () => (mode === 'bot' ? 1 - botPlayer : state.current);
   const isBotTurn = () => mode === 'bot' && state.current === botPlayer && state.phase !== 'gameover';
@@ -84,7 +96,7 @@ export function openGame(root, { state, mode, botPlayer = 1, onChange, onExit, o
     aim = null;
     mineCell = null;
     onChange(state);
-    if (state.rolls.length) showDice(diceLayer, state.rolls, texts, { fast: byBot, onClose: () => render() });
+    if (state.rolls.length) showDice(diceLayer, state.rolls, texts, { fast: byBot, speed: mult(), onClose: () => render() });
     if (action.type === 'fire') announce(texts, ai);
     render({ animate: true });
   }
@@ -151,6 +163,7 @@ export function openGame(root, { state, mode, botPlayer = 1, onChange, onExit, o
     renderScore(v);
 
     // Automatické přepínání záložek podle situace
+    if (summaryEntries().length) tab = 'own';
     if (state.phase === 'place-mine' && !isBotTurn()) tab = 'own';
     if (state.phase === 'aim' && !isBotTurn()) tab = 'target';
     renderTabs();
@@ -173,10 +186,13 @@ export function openGame(root, { state, mode, botPlayer = 1, onChange, onExit, o
     // Vlastní plocha
     const ownRender = ownRenderer(me.layout, me, opp.known);
     const mineOptions = state.phase === 'place-mine' && !isBotTurn() ? new Set(state.options.cells) : null;
+    const botItem = botAim !== null && isBotTurn() ? currentItem(state) : null;
+    const botPreview = new Set(botItem ? patternCells(state, botItem, botAim) : []);
     ownBoard.update((i) => {
       const r = ownRender(i);
       if (mineOptions?.has(i)) r.cls += ' option';
-      if (i === mineCell) r.cls += ' aim';
+      if (botPreview.has(i)) r.cls += ' preview enemy';
+      if (i === mineCell || (botItem && i === botAim)) r.cls += ' aim';
       return r;
     }, { animate });
     ownFleet.replaceChildren(fleetStrip(me, { own: true }));
@@ -286,6 +302,38 @@ export function openGame(root, { state, mode, botPlayer = 1, onChange, onExit, o
     return card(patternEl(first.pattern, P.layout.uloShot, n), m.label, desc, () => act({ type: 'chooseMode', mode: m.id }));
   }
 
+  // Záznamy soupeřových tahů od mého posledního tahu (pro shrnutí na začátku tahu).
+  function summaryEntries() {
+    if (isBotTurn() || state.phase === 'gameover' || !TURN_START.includes(state.phase) || ackTurn === state.turn) return [];
+    if (mode === 'hotseat' && passFor !== state.current) return [];
+    const v = viewer();
+    const out = [];
+    for (let k = state.log.length - 1; k >= 0; k--) {
+      const e = state.log[k];
+      if (e.turn >= state.turn) continue;
+      if (e.player === v) break;
+      out.unshift(e);
+    }
+    return out.some((e) => !e.text.startsWith('—')) ? out : [];
+  }
+
+  function summaryList(entries) {
+    return h('ul', { class: 'summary' }, entries.map((e) => {
+      const t = e.text;
+      if (t.startsWith('—')) return h('li', { class: 'sum-head' }, t.replace(/—/g, '').trim());
+      const cls = /POTOPENA|ZNIČENO|KONEC/.test(t) ? 'big' : /ZÁSAH|MAJÁK|MINA|SPECIÁL|zásah/.test(t) ? 'hot' : /bonus|Bonus/.test(t) ? 'bonus' : '';
+      return h('li', { class: cls }, t);
+    }));
+  }
+
+  function speedControl() {
+    return h('div', { class: 'speed' }, h('span', { class: 'muted' }, 'Rychlost počítače'),
+      h('div', { class: 'seg' }, Object.entries(SPEEDS).map(([id, sp]) => h('button', {
+        type: 'button', class: speed === id ? 'active' : '',
+        onclick: () => { speed = id; onSettings({ speed }); render(); },
+      }, sp.label))));
+  }
+
   function renderPanel() {
     const s = state;
     const parts = [];
@@ -298,8 +346,21 @@ export function openGame(root, { state, mode, botPlayer = 1, onChange, onExit, o
       return;
     }
     if (isBotTurn()) {
-      parts.push(h('div', { class: 'bot-thinking' }, h('span', { class: 'spinner' }), h('strong', {}, `${s.players[s.current].name} hraje…`)));
+      const item = botAim !== null ? currentItem(s) : null;
+      parts.push(h('div', { class: 'bot-thinking' }, h('span', { class: 'spinner' }),
+        h('strong', {}, item ? `${s.players[s.current].name} míří na ${label(botAim)}` : `${s.players[s.current].name} hraje…`),
+        item ? h('span', { class: 'muted' }, ` · ${PATTERN_NAMES[effectivePattern(s, item)]}`) : null));
       parts.push(lastResults());
+      parts.push(speedControl());
+      panel.replaceChildren(...parts.filter(Boolean));
+      return;
+    }
+    const summary = summaryEntries();
+    if (summary.length) {
+      const opp = s.players[1 - viewer()];
+      parts.push(instruction(`Co udělal ${opp.name}`, 'Na své ploše (záložka Moje) vidíš, kam soupeř střílel.'));
+      parts.push(summaryList(summary));
+      parts.push(bigBtn('Můj tah', () => { ackTurn = s.turn; tab = 'target'; render(); }, { ic: null }));
       panel.replaceChildren(...parts.filter(Boolean));
       return;
     }
@@ -536,16 +597,25 @@ export function openGame(root, { state, mode, botPlayer = 1, onChange, onExit, o
 
   // ------------------------------------------------------------------- bot
   function scheduleBot() {
+    if (botAim !== null) return; // čeká se na výstřel po náhledu
     clearTimeout(botTimer);
     if (!isBotTurn()) return;
     if (tab === 'target') { tab = 'own'; queueMicrotask(render); return; }
+    const delay = (BOT_DELAY[state.phase] || BOT_DELAY.default) * mult();
     botTimer = setTimeout(() => {
       if (diceOpen()) { scheduleBot(); return; }
-      const action = botAction(state, botRng);
+      const action = botAction(state, botRng, difficulty);
       if (!action) return;
+      // Před výstřelem počítač nejdřív ukáže, kam míří.
+      if (action.type === 'fire' && action.cell !== undefined && botAim === null) {
+        botAim = action.cell;
+        render();
+        clearTimeout(botTimer);
+        botTimer = setTimeout(() => { botAim = null; act(action); }, AIM_PREVIEW * mult());
+        return;
+      }
       act(action);
-      if (!isBotTurn() && state.phase !== 'gameover') { tab = 'target'; render(); }
-    }, BOT_DELAY[state.phase] || BOT_DELAY.default);
+    }, delay);
   }
 
   render();

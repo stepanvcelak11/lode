@@ -11,6 +11,14 @@ import { markdownToHtml } from './markdown.js';
 
 const SAVE_KEY = 'lode.save.v1';
 const NAMES_KEY = 'lode.names';
+const PREFS_KEY = 'lode.prefs';
+
+const DIFFICULTIES = {
+  easy: { label: 'Lehká', desc: 'Střílí většinou naslepo. Na seznámení se hrou.' },
+  normal: { label: 'Střední', desc: 'Po zásahu loď dorazí, jinak hledá náhodně.' },
+  hard: { label: 'Těžká', desc: 'Počítá, kde lodě mohou být, a vyhýbá se tvé obraně.' },
+};
+const SPEED_LABELS = { slow: 'Pomalu', normal: 'Normálně', fast: 'Rychle' };
 const root = document.getElementById('app');
 let current = null;
 
@@ -52,11 +60,11 @@ function home() {
     h('h1', { class: 'logo-title' }, 'LODĚ'),
     h('p', { class: 'tagline' }, 'Námořní bitva s pevninou, děly, majáky a bonusy'),
     h('div', { class: 'menu' },
-      canResume ? item('fire', 'Pokračovat ve hře', `${save.state.players[0].name} vs ${save.state.players[1].name} · tah ${save.state.turn}`, () => resume(save), 'primary') : null,
+      canResume ? item('fire', 'Pokračovat ve hře', `${save.state.players[0].name} vs ${save.state.players[1].name} · tah ${save.state.turn}${save.mode === 'bot' ? ` · ${DIFFICULTIES[save.difficulty || 'normal'].label.toLowerCase()}` : ''}`, () => resume(save), 'primary') : null,
       item('ship', 'Hra proti počítači', 'Ty proti počítačovému admirálovi', () => setup('bot')),
       item(h('span', { class: 'two-av' }, h('i', { class: 'pc0' }, 'A'), h('i', { class: 'pc1' }, 'B')), 'Dva hráči', 'Na jednom telefonu, střídáte se', () => setup('hotseat')),
       item('book', 'Pravidla', 'Jak se hraje', rules, 'ghost')),
-    h('p', { class: 'foot muted' }, 'Verze 0.2')));
+    h('p', { class: 'foot muted' }, 'Verze 0.3')));
 }
 
 function setup(mode) {
@@ -65,10 +73,24 @@ function setup(mode) {
   const n1 = h('input', { type: 'text', value: names[0], maxlength: 16, 'aria-label': 'Jméno hráče 1', autocomplete: 'off' });
   const n2 = h('input', { type: 'text', value: mode === 'bot' ? 'Počítač' : names[1], maxlength: 16, 'aria-label': 'Jméno hráče 2', autocomplete: 'off', disabled: mode === 'bot' });
   const field = (k, labelText, input) => h('label', { class: `name-field pc${k}` }, h('span', { class: 'avatar' }, String(k + 1)), h('span', { class: 'nf-text' }, h('small', {}, labelText), input));
+  const prefs = { difficulty: 'normal', speed: 'normal', ...store.get(PREFS_KEY, {}) };
+  const diffEl = h('div', { class: 'diff' });
+  const speedEl = h('div', { class: 'seg wide' });
+  const renderPrefs = () => {
+    diffEl.replaceChildren(...Object.entries(DIFFICULTIES).map(([id, d]) => h('button', {
+      type: 'button', class: `diff-opt${prefs.difficulty === id ? ' active' : ''}`, 'aria-pressed': String(prefs.difficulty === id),
+      onclick: () => { prefs.difficulty = id; renderPrefs(); },
+    }, h('span', { class: `diff-dots d-${id}` }, h('i'), h('i'), h('i')), h('strong', {}, d.label), h('small', {}, d.desc))));
+    speedEl.replaceChildren(...Object.entries(SPEED_LABELS).map(([id, l]) => h('button', {
+      type: 'button', class: prefs.speed === id ? 'active' : '', onclick: () => { prefs.speed = id; renderPrefs(); },
+    }, l)));
+  };
+  renderPrefs();
   const go = () => {
     const list = [n1.value.trim() || 'Hráč 1', n2.value.trim() || 'Hráč 2'];
     store.set(NAMES_KEY, mode === 'hotseat' ? list : [list[0], names[1]]);
-    placeFor(mode, list, 0, []);
+    store.set(PREFS_KEY, prefs);
+    placeFor(mode, list, 0, [], prefs);
   };
   root.replaceChildren(
     h('header', { class: 'topbar' },
@@ -80,6 +102,8 @@ function setup(mode) {
         field(0, 'Hráč 1', n1),
         h('div', { class: 'vs-line' }, 'vs'),
         field(1, mode === 'bot' ? 'Soupeř' : 'Hráč 2', n2),
+        mode === 'bot' ? h('div', { class: 'pref' }, h('h3', {}, 'Obtížnost'), diffEl) : null,
+        mode === 'bot' ? h('div', { class: 'pref' }, h('h3', {}, 'Rychlost tahů počítače'), speedEl, h('small', { class: 'muted' }, 'Rychlost můžeš změnit i během hry.')) : null,
         h('ol', { class: 'how' },
           h('li', {}, 'Rozmístíš pevninu, stavby, ostrovy a lodě (nebo vše náhodně jedním tlačítkem).'),
           mode === 'bot' ? h('li', {}, 'Počítač si svou plochu rozmístí sám.') : h('li', {}, 'Pak předáš telefon a druhý hráč udělá totéž – nedívej se!'),
@@ -87,18 +111,18 @@ function setup(mode) {
         h('button', { type: 'button', class: 'btn primary big', onclick: go }, 'Pokračovat →'))));
 }
 
-function placeFor(mode, names, k, layouts) {
+function placeFor(mode, names, k, layouts, prefs = {}) {
   if (mode === 'bot' && k === 1) {
     layouts[1] = randomLayout(createRng(Date.now()));
-    return start(mode, names, layouts);
+    return start(mode, names, layouts, prefs);
   }
-  if (k === 2) return start(mode, names, layouts);
+  if (k === 2) return start(mode, names, layouts, prefs);
   const go = () => openEditor(root, {
     playerName: names[k],
     playerIndex: k,
     initial: null,
     onBack: home,
-    onDone: (layout) => { layouts[k] = layout; placeFor(mode, names, k + 1, layouts); },
+    onDone: (layout) => { layouts[k] = layout; placeFor(mode, names, k + 1, layouts, prefs); },
   });
   if (mode === 'hotseat' && k === 1) passScreen(1, names[1], 'rozmístit svou plochu', go);
   else go();
@@ -114,9 +138,9 @@ function passScreen(k, name, what, onGo) {
     h('button', { type: 'button', class: 'btn primary big', onclick: onGo }, `Jsem ${name}`)));
 }
 
-function start(mode, names, layouts) {
+function start(mode, names, layouts, prefs = {}) {
   const state = createGame({ layouts, names, seed: Date.now() });
-  const save = { mode, botPlayer: 1, state };
+  const save = { mode, botPlayer: 1, difficulty: prefs.difficulty || 'normal', speed: prefs.speed || 'normal', state };
   store.set(SAVE_KEY, save);
   resume(save);
 }
@@ -127,7 +151,14 @@ function resume(save) {
     state: save.state,
     mode: save.mode,
     botPlayer: save.botPlayer,
+    difficulty: save.difficulty || 'normal',
+    speed: save.speed || 'normal',
     onChange: (state) => store.set(SAVE_KEY, { ...save, state }),
+    onSettings: (patch) => {
+      Object.assign(save, patch);
+      store.set(SAVE_KEY, save);
+      store.set(PREFS_KEY, { ...store.get(PREFS_KEY, {}), ...patch });
+    },
     onExit: home,
     onNewGame: () => { store.remove(SAVE_KEY); home(); },
   });

@@ -1,5 +1,5 @@
 // Service worker – hra funguje i bez internetu. Při změně souborů zvyš VERSION.
-const VERSION = 'lode-v2';
+const VERSION = 'lode-v3';
 const FILES = [
   './',
   'index.html',

@@ -98,7 +98,7 @@ export class Board {
     void this.banner.offsetWidth;
     this.banner.classList.add('show');
     clearTimeout(this.bannerTimer);
-    this.bannerTimer = setTimeout(() => this.banner.classList.remove('show'), 2200);
+    this.bannerTimer = setTimeout(() => this.banner.classList.remove('show'), 3200);
   }
 
   scrollTo(i) {

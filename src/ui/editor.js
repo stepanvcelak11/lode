@@ -1,9 +1,9 @@
 // Editor rozmístění – průvodce ve 4 krocích: pevnina a stavby, moře, lodě, střela ULO.
 
 import {
-  SHIP_TYPES, SHIP_ORDER, STRUCTURE_TYPES, LAND_CELLS, MAX_ISLANDS, MAX_LIGHTHOUSES, ULO_SHOT_SIZE,
+  SHIP_TYPES, SHIP_ORDER, STRUCTURE_TYPES, LAND_CELLS, MAX_ISLANDS, MAX_LIGHTHOUSES, ULO_SHOT_SIZE, HEIGHT,
 } from '../engine/constants.js';
-import { idx, xOf, yOf, inBounds, transformShape, isConnected4, anchorShape } from '../engine/geometry.js';
+import { idx, xOf, yOf, inBounds, transformShape, isConnected4, anchorShape, neighbors4, neighbors8, distanceToSet } from '../engine/geometry.js';
 import {
   emptyLayout, cloneLayout, occupancy, validateLayout, shipPlacementErrors, randomLayout, shipSize, tryPlaceShip, randomUloShot,
 } from '../engine/layout.js';
@@ -21,7 +21,7 @@ const STEPS = [
   {
     id: 'land', title: 'Pevnina a stavby', short: 'Pevnina',
     tools: ['land', 'Z', 'P', 'V', 'DI', 'DII', 'H', 'erase'],
-    intro: 'Nakresli 60 polí pevniny a postav na ni stavby (stavby pevninu přidají samy). Horní řada R musí zůstat mořem.',
+    intro: 'Nejdřív nakresli 60 polí pevniny (můžeš táhnout prstem), pak na ni postav stavby. Horní řada R musí zůstat mořem.',
     owns: (e) => /^(Pevnina|V horní|Voda nesmí|Přístav musí)/.test(e) || STRUCT_NAMES.some((n) => e.startsWith(`${n}:`)),
   },
   {
@@ -45,8 +45,8 @@ const STEPS = [
 ];
 
 const TOOL_INFO = {
-  land: { name: 'Pevnina', hint: 'Klepnutím přidáš nebo odebereš pole pevniny.' },
-  erase: { name: 'Guma', hint: 'Klepnutím odstraníš, co na políčku je.' },
+  land: { name: 'Pevnina', hint: 'Klepni nebo táhni prstem – přidáš (nebo ubereš) pole pevniny.' },
+  erase: { name: 'Guma', hint: 'Klepnutím (nebo tahem) odstraníš, co na políčku je.' },
   island: { name: 'Ostrov', hint: 'Ostrov 1×1 na vodě, nejvýš 3 vedle sebe.' },
   lighthouse: { name: 'Maják', hint: 'Na vodě, nejvýš 3 pole od pevniny.' },
   special: { name: 'Speciální', hint: 'Jedno políčko na volné vodě nebo pevnině.' },
@@ -67,7 +67,42 @@ export function openEditor(root, { playerName, playerIndex = 0, initial, onDone,
   let draft = [];
   let hover = null;
 
-  const board = new Board({ onCell: (i) => { apply(i); refresh(); }, caption: 'Tvoje plocha' });
+  // Pevninu a gumu lze „malovat“ tahem prstu – ty obsluhují pointer události.
+  const paintTool = () => (tool === 'land' || tool === 'erase') && STEPS[step].id !== 'ulo';
+  const board = new Board({ onCell: (i) => { if (paintTool()) return; apply(i); refresh(); }, caption: 'Tvoje plocha' });
+  let stroke = null;
+  const strokeAt = (i) => {
+    if (stroke.done.has(i)) return;
+    stroke.done.add(i);
+    if (stroke.mode === 'erase') eraseAt(i);
+    else {
+      const err = landAt(i, stroke.mode);
+      if (err && !stroke.err) stroke.err = err;
+    }
+    paint();
+  };
+  board.grid.addEventListener('pointerdown', (e) => {
+    const t = e.target.closest('.cell');
+    if (!t || !paintTool()) return;
+    const i = Number(t.dataset.i);
+    stroke = { mode: tool === 'erase' ? 'erase' : layout.land.includes(i) ? 'remove' : 'add', done: new Set(), err: null };
+    strokeAt(i);
+    e.preventDefault();
+  });
+  const onMove = (e) => {
+    if (!stroke) return;
+    const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('.cell');
+    if (el && board.grid.contains(el)) strokeAt(Number(el.dataset.i));
+  };
+  const onUp = () => {
+    if (!stroke) return;
+    if (stroke.err) toast(stroke.err);
+    stroke = null;
+    refresh();
+  };
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onUp);
   board.grid.addEventListener('mouseover', (e) => {
     const t = e.target.closest('.cell');
     hover = t ? Number(t.dataset.i) : null;
@@ -118,6 +153,13 @@ export function openEditor(root, { playerName, playerIndex = 0, initial, onDone,
   }
 
   const optional = (kind) => kind === 'island' || kind === 'lighthouse';
+  // Nástroj, který ještě nedává smysl (stavby a maják potřebují pevninu).
+  const locked = (t) => {
+    if (layout.land.length) return null;
+    if (STRUCTURE_TYPES[t]) return 'Stavby se stavějí na pevninu – nejdřív nakresli pevninu.';
+    if (t === 'lighthouse') return 'Maják stojí u pevniny – nejdřív nakresli pevninu.';
+    return null;
+  };
 
   function currentShape() {
     if (SHIP_TYPES[tool]?.shape) return transformShape(SHIP_TYPES[tool].shape, rotation, mirrored);
@@ -160,28 +202,65 @@ export function openEditor(root, { playerName, playerIndex = 0, initial, onDone,
 
   function placeStructure(type, cells) {
     const occ = occupancy(layout);
-    if (cells.some((c) => blockedForLand(c, occ))) return toast('Stavba musí stát na volném místě (bez lodí, ostrovů a majáků).');
-    if (cells.some((c) => occ.structure[c] !== -1)) return toast('Tady už stojí jiná stavba.');
-    if (count(type) >= maxOf(type)) {
-      layout.structures.splice(layout.structures.findIndex((s) => s.type === type), 1);
-    }
-    for (const c of cells) if (!layout.land.includes(c)) layout.land.push(c);
-    if (cells.includes(layout.special)) layout.special = null;
+    const name = STRUCTURE_TYPES[type].name;
+    if (!layout.land.length) return toast('Stavby se stavějí na pevninu – nejdřív ji nakresli nástrojem Pevnina.');
+    if (cells.some((c) => !occ.land[c])) return toast(`${name} musí celá stát na pevnině.`);
+    if (cells.some((c) => layout.special === c)) return toast('Na tomhle poli je speciální políčko.');
+    // přesun: když už stavba stojí jinde, nejdřív ji odebereme
+    const old = count(type) >= maxOf(type) ? layout.structures.findIndex((x) => x.type === type) : -1;
+    if (cells.some((c) => occ.structure[c] !== -1 && occ.structure[c] !== old)) return toast('Tady už stojí jiná stavba.');
+    if (type === 'P' && !cells.some((c) => neighbors4(c).some((n) => !occ.land[n]))) return toast('Přístav musí stát u moře.');
+    if (old !== -1) layout.structures.splice(old, 1);
     layout.structures.push({ type, cells });
+  }
+
+  // Sousedí políčko s velkou lodí (letadlová, bitevní, ULO)?
+  function touchesBigShip(i, occ) {
+    return [i, ...neighbors8(i)].some((n) => occ.ship[n] !== -1 && SHIP_TYPES[layout.ships[occ.ship[n]].type].big);
+  }
+
+  // Pevnina: add = přidat, remove = ubrat. Vrací text chyby nebo null.
+  function landAt(i, mode, occ = occupancy(layout)) {
+    const has = occ.land[i] === 1;
+    if (mode === 'remove') {
+      if (!has) return null;
+      if (occ.structure[i] !== -1) return `Na tomhle poli stojí ${STRUCTURE_TYPES[layout.structures[occ.structure[i]].type].name.toLowerCase()} – nejdřív ji odstraň gumou.`;
+      layout.land = layout.land.filter((c) => c !== i);
+      return null;
+    }
+    if (has) return null;
+    if (yOf(i) === HEIGHT - 1) return 'V horní řadě (R) nesmí být pevnina.';
+    if (blockedForLand(i, occ)) return 'Na lodi, ostrově ani majáku nemůže být pevnina.';
+    if (touchesBigShip(i, occ)) return 'Pevnina by se dotýkala velké lodi.';
+    if (count('land') >= LAND_CELLS) return `Pevnina už má všech ${LAND_CELLS} polí.`;
+    layout.land.push(i);
+    return null;
+  }
+
+  // Guma: odstraní nejvyšší vrstvu na políčku (loď, speciální, stavbu, ostrov, maják, pevninu).
+  function eraseAt(i, occ = occupancy(layout)) {
+    if (removeShipAt(i)) return;
+    if (layout.special === i) { layout.special = null; return; }
+    if (removeStructureAt(i)) return;
+    if (layout.islands.includes(i)) { layout.islands = layout.islands.filter((c) => c !== i); return; }
+    if (layout.lighthouses.includes(i)) { layout.lighthouses = layout.lighthouses.filter((c) => c !== i); return; }
+    landAt(i, 'remove', occ);
+  }
+
+  function islandGroupSize(i) {
+    const set = new Set([...layout.islands, i]);
+    const seen = new Set([i]);
+    const stack = [i];
+    while (stack.length) {
+      for (const n of neighbors4(stack.pop())) if (set.has(n) && !seen.has(n)) { seen.add(n); stack.push(n); }
+    }
+    return seen.size;
   }
 
   function apply(i) {
     if (STEPS[step].id === 'ulo') return;
     const occ = occupancy(layout);
-    if (tool === 'erase') {
-      if (removeShipAt(i)) return;
-      if (layout.special === i) { layout.special = null; return; }
-      if (removeStructureAt(i)) return;
-      if (layout.islands.includes(i)) { layout.islands = layout.islands.filter((c) => c !== i); return; }
-      if (layout.lighthouses.includes(i)) { layout.lighthouses = layout.lighthouses.filter((c) => c !== i); return; }
-      layout.land = layout.land.filter((c) => c !== i);
-      return;
-    }
+    if (tool === 'erase') { eraseAt(i, occ); return; }
     if (SHIP_TYPES[tool] && occ.ship[i] !== -1) {
       const ship = removeShipAt(i);
       tool = ship.type;
@@ -190,26 +269,25 @@ export function openEditor(root, { playerName, playerIndex = 0, initial, onDone,
       return;
     }
     switch (tool) {
-      case 'land':
-        if (layout.land.includes(i)) {
-          removeStructureAt(i);
-          layout.land = layout.land.filter((c) => c !== i);
-        } else {
-          if (blockedForLand(i, occ)) return toast('Na lodi, ostrově ani majáku nemůže být pevnina.');
-          if (count('land') >= LAND_CELLS) return toast(`Pevnina už má všech ${LAND_CELLS} polí. Gumou nebo klepnutím na pevninu nějaké uber.`);
-          layout.land.push(i);
-        }
+      case 'land': {
+        const err = landAt(i, occ.land[i] ? 'remove' : 'add', occ);
+        if (err) toast(err);
         return;
+      }
       case 'island':
         if (layout.islands.includes(i)) { layout.islands = layout.islands.filter((c) => c !== i); return; }
         if (occ.land[i] || occ.ship[i] !== -1 || occ.lighthouse[i] || layout.special === i) return toast('Ostrov patří na volnou vodu.');
         if (count('island') >= MAX_ISLANDS) return toast(`Ostrovů může být nejvýš ${MAX_ISLANDS}.`);
+        if (islandGroupSize(i) > 3) return toast('Vedle sebe smí být nejvýš 3 ostrovy.');
+        if (touchesBigShip(i, occ)) return toast('Ostrov by se dotýkal velké lodi.');
         layout.islands.push(i);
         return;
       case 'lighthouse':
         if (layout.lighthouses.includes(i)) { layout.lighthouses = layout.lighthouses.filter((c) => c !== i); return; }
         if (occ.land[i] || occ.ship[i] !== -1 || occ.island[i] || layout.special === i) return toast('Maják patří na volnou vodu (max. 3 pole od pevniny).');
         if (count('lighthouse') >= MAX_LIGHTHOUSES) return toast(`Majáky mohou být nejvýš ${MAX_LIGHTHOUSES}.`);
+        if (!layout.land.length || distanceToSet(i, layout.land) > 3) return toast('Maják musí stát nejvýš 3 pole od pevniny.');
+        if (touchesBigShip(i, occ)) return toast('Maják by se dotýkal velké lodi.');
         layout.lighthouses.push(i);
         return;
       case 'special':
@@ -256,6 +334,27 @@ export function openEditor(root, { playerName, playerIndex = 0, initial, onDone,
     draft = [];
     refresh();
     toast('Hotovo – rozmístění je náhodné a platné. Můžeš ho ještě upravit.');
+  }
+
+  // Nová pevnina se stavbami; co se s ní nesnese (lodě, ostrovy, majáky), se odebere.
+  function randomLand() {
+    const r = randomLayout(createRng(Date.now()));
+    const next = cloneLayout(layout);
+    next.land = r.land;
+    next.structures = r.structures;
+    const land = new Set(r.land);
+    const before = next.ships.length + next.islands.length + next.lighthouses.length;
+    next.islands = next.islands.filter((c) => !land.has(c));
+    next.lighthouses = next.lighthouses.filter((c) => !land.has(c) && distanceToSet(c, r.land) <= 3);
+    if (next.special !== null && r.structures.some((x) => x.cells.includes(next.special))) next.special = null;
+    const ships = next.ships;
+    next.ships = [];
+    for (const ship of ships) if (!shipPlacementErrors(next, ship.type, ship.cells).length) next.ships.push(ship);
+    const removed = before - (next.ships.length + next.islands.length + next.lighthouses.length);
+    layout = next;
+    draft = [];
+    refresh();
+    toast(removed ? `Nová pevnina je hotová. ${removed} věcí překáželo, tak jsem je odebral.` : 'Nová pevnina se stavbami je hotová.');
   }
 
   function randomShips() {
@@ -315,11 +414,15 @@ export function openEditor(root, { playerName, playerIndex = 0, initial, onDone,
       const name = TOOL_INFO[t]?.name || SHIP_TYPES[t]?.name;
       return h('button', {
         type: 'button',
-        class: `tool${tool === t ? ' active' : ''}${full ? ' full' : ''}${t === 'erase' ? ' erase' : ''}`,
-        onclick: () => { tool = t; draft = []; rotation = 0; mirrored = false; refresh(); },
+        class: `tool${tool === t ? ' active' : ''}${full ? ' full' : ''}${t === 'erase' ? ' erase' : ''}${locked(t) ? ' locked' : ''}`,
+        onclick: () => {
+          if (locked(t)) toast(locked(t));
+          tool = t; draft = []; rotation = 0; mirrored = false; refresh();
+        },
       },
       h('span', { class: 'tool-ico' }, toolIcon(t)),
       h('span', { class: 'tool-name' }, name),
+      locked(t) ? h('span', { class: 'tool-lock' }, STRUCTURE_TYPES[t] ? 'nejdřív pevnina' : 'u pevniny') : null,
       max !== null ? h('span', { class: 'tool-count' }, full ? '✓' : `${c}/${max}`, optional(t) && !full ? h('small', {}, ' volit.') : null) : null);
     }));
 
@@ -336,6 +439,7 @@ export function openEditor(root, { playerName, playerIndex = 0, initial, onDone,
         h('button', { type: 'button', class: 'icon-btn round', title: 'Otočit', 'aria-label': 'Otočit', onclick: () => { rotation = (rotation + 1) % 4; refresh(); } }, icon('rotate')),
         SHIP_TYPES[tool] ? h('button', { type: 'button', class: 'icon-btn round', title: 'Zrcadlit', 'aria-label': 'Zrcadlit', onclick: () => { mirrored = !mirrored; refresh(); } }, icon('mirror')) : null) : null,
       s.id === 'ships' ? h('button', { type: 'button', class: 'btn small', onclick: randomShips }, icon('dice'), ' Lodě náhodně') : null,
+      s.id === 'land' ? h('button', { type: 'button', class: 'btn small', onclick: randomLand }, icon('dice'), ' Pevnina náhodně') : null,
     ].filter(Boolean));
   }
 
@@ -421,6 +525,7 @@ export function openEditor(root, { playerName, playerIndex = 0, initial, onDone,
     const errors = validateLayout(layout);
     const isUlo = STEPS[step].id === 'ulo';
     boardArea.classList.toggle('hidden', isUlo);
+    board.el.classList.toggle('paint-mode', paintTool());
     uloArea.classList.toggle('hidden', !isUlo);
     renderStepper(errors);
     renderTools();
